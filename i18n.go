@@ -1,5 +1,5 @@
 // Copyright (c) Jeevanandam M. (https://github.com/jeevatkm)
-// go-aah/i18n source code and usage is governed by a MIT style
+// aahframework.org/i18n source code and usage is governed by a MIT style
 // license that can be found in the LICENSE file.
 
 // Package i18n is internationalization and localization support for aah
@@ -39,46 +39,52 @@ import (
 	"aahframework.org/config.v0"
 	"aahframework.org/essentials.v0"
 	"aahframework.org/log.v0"
+	"aahframework.org/vfs.v0"
 )
 
-// Version no. of aah framework i18n library
-const Version = "0.3"
+//‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
+// Package methods
+//______________________________________________________________________________
+
+// New method creates aah i18n message store
+func New() *I18n {
+	return NewWithVFS(nil)
+}
+
+// NewWithVFS method creates aah i18n message store with given Virtual FileSystem.
+func NewWithVFS(fs *vfs.VFS) *I18n {
+	return &I18n{
+		Store:        make(map[string]*config.Config),
+		fileExtRegex: `messages\.[a-z]{2}(\-[a-zA-Z]{2})?$`,
+		vfs:          fs,
+	}
+}
+
+//‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
+// I18n methods
+//______________________________________________________________________________
 
 // I18n holds the message store and related information for internationalization
 // and localization.
 type I18n struct {
 	Store         map[string]*config.Config
 	DefaultLocale string
-	fileExtRegex  string
+
+	fileExtRegex string
+	vfs          *vfs.VFS
 }
-
-//‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
-// Package methods
-//___________________________________
-
-// New method creates aah i18n message store
-func New() *I18n {
-	return &I18n{
-		Store:        make(map[string]*config.Config),
-		fileExtRegex: `messages\.[a-z]{2}(\-[a-zA-Z]{2})?$`,
-	}
-}
-
-//‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
-// I18n methods
-//___________________________________
 
 // Load processes the given message file or directory and adds to the
 // message store
 func (s *I18n) Load(paths ...string) error {
 	for _, path := range paths {
-		if !ess.IsFileExists(path) {
+		if !vfs.IsExists(s.vfs, path) {
 			log.Warnf("Path: %v not exists, let's move on", path)
 			continue
 		}
 
-		if ess.IsDir(path) {
-			_ = ess.Walk(path, func(fpath string, f os.FileInfo, _ error) error {
+		if s.isDir(path) {
+			_ = vfs.Walk(s.vfs, path, func(fpath string, f os.FileInfo, _ error) error {
 				if !f.IsDir() {
 					match, err := regexp.MatchString(s.fileExtRegex, f.Name())
 					if err == nil && match {
@@ -111,10 +117,10 @@ func (s *I18n) Lookup(locale *ahttp.Locale, key string, args ...interface{}) str
 	// Lookup by language and region-id. For eg.: en-us
 	store := s.findStoreByLocale(locale.String())
 	if store == nil {
-		log.Tracef("Locale (%v) doesn't exists in message store", locale.String())
+		log.Tracef("Locale (%v) doesn't exists in message store", locale)
 		goto langStore
 	}
-	log.Tracef("Message is retrieved from locale: %v, key: %v", locale.String(), key)
+	log.Tracef("Message is retrieved from locale: %v, key: %v", locale, key)
 	if msg, found := retriveValue(store, key, args...); found {
 		return msg
 	}
@@ -154,13 +160,13 @@ func (s *I18n) Locales() []string {
 	return locales
 }
 
-//‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
+//‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 // I18n Unexported methods
-//___________________________________
+//______________________________________________________________________________
 
 func (s *I18n) processMsgFile(file string) {
 	key := strings.ToLower(filepath.Ext(file)[1:])
-	msgFile, err := config.LoadFile(file)
+	msgFile, err := config.VFSLoadFile(s.vfs, file)
 	if err != nil {
 		log.Errorf("Unable to load message file: %v, error: %v", file, err)
 	}
@@ -184,9 +190,9 @@ func (s *I18n) findStoreByLocale(locale string) *config.Config {
 	return nil
 }
 
-//‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
-// Unexported methods
-//___________________________________
+//‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
+// Package Unexported methods
+//______________________________________________________________________________
 
 func retriveValue(store *config.Config, key string, args ...interface{}) (string, bool) {
 	if msg, found := store.String(key); found {
@@ -196,4 +202,16 @@ func retriveValue(store *config.Config, key string, args ...interface{}) (string
 		return msg, found
 	}
 	return "", false
+}
+
+func (s *I18n) isDir(name string) bool {
+	if s.vfs == nil {
+		return ess.IsDir(name)
+	}
+
+	fi, err := s.vfs.Lstat(name)
+	if err != nil {
+		return false
+	}
+	return fi.IsDir()
 }
